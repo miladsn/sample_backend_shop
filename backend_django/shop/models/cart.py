@@ -34,12 +34,12 @@ class Cart(models.Model):
 
     @property
     def total_items_count(self) -> int:
-        """تعداد کل آیتم‌ها در سبد خرید"""
+        """Total quantity of items in the cart."""
         return sum(item.quantity for item in self.items.all())
 
     @property
     def total_price(self) -> Decimal:
-        """جمع کل مبلغ سبد خرید"""
+        """Total price of the cart."""
         return sum((item.unit_price * item.quantity) for item in self.items.all())
 
 

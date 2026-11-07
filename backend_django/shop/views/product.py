@@ -126,7 +126,7 @@ def product_update(request, pk):
             if image_file_id:
                 product.featured_image_id = image_file_id
 
-            # در product_create و product_update:
+            # Validate submitted options before saving the product.
             options_data_str = request.POST.get('options_data', '')
             duplicate_error = validate_option_duplicates(options_data_str)
             if duplicate_error:
@@ -226,8 +226,8 @@ def product_album_delete(request, pk):
 
 def save_product_options(product, options_json_str):
     """
-    پردازش و ذخیره آپشن‌های محصول از روی رشته JSON
-    ساختار داده به صورت درختی (والد - فرزند) پشتیبانی می‌شود.
+    Parse and save product options from JSON.
+    Supports a parent-child option tree.
     """
     if not options_json_str:
         return
