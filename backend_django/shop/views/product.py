@@ -1,14 +1,13 @@
 # shop/views/product
 import json
+from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth.decorators import permission_required
 from django.contrib.auth.mixins import PermissionRequiredMixin
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db import transaction
 from django.shortcuts import render, get_object_or_404, redirect
-from django.template.defaultfilters import title
-from django.urls import reverse_lazy, reverse
+from django.urls import reverse_lazy
 from django.views.decorators.http import require_POST
 from django.views.generic import DeleteView, ListView
 
@@ -16,13 +15,15 @@ from media_files.services import FileManager
 from shop.forms import ProductForm
 from shop.models import Product, ProductAlbum, ProductOptionValue, ProductOptionItem, ProductOptionGroup, \
     ProductAttribute
-from shop.views.helpers import  create_module_breadcrumbs
+from shop.views.helpers import create_module_breadcrumbs
 from django.db import transaction
+
 
 def get_default_breadcrumbs(without_link=False):
     return create_module_breadcrumbs(
         "محصولات", "shop:product_list", without_link
     )
+
 
 class ProductListView(PermissionRequiredMixin, ListView):
     model = Product
@@ -47,44 +48,49 @@ def product_create(request):
     if request.method == 'POST':
         form = ProductForm(request.POST, request.FILES)
         if form.is_valid():
-            with transaction.atomic():
-                product = form.save(commit=False)
-
-                uploaded_image = request.FILES.get('featured_image_file')
-                if uploaded_image:
-                    stored_file = FileManager.store(
-                        uploaded_file=uploaded_image,
-                        path='products',
-                        user=request.user,
-                        is_secure=False
-                    )
-                    product.featured_image_id = stored_file.id
-
-                product.save()
-                form.save_m2m()
-
-                raw_attributes = request.POST.get('attributes_json', '[]')
-                sync_product_attributes(product, raw_attributes)
-
-                options_data_str = request.POST.get('options_data', '')
-                save_product_options(product, options_data_str)
-
-                handle_album_uploads(request, product)
-
-            messages.success(request, 'محصول با موفقیت ایجاد شد.')
-
-            save_action = request.POST.get('save_action', 'exit')
-            if save_action == 'stay':
-                return redirect('shop:product_update', pk=product.pk)
-            return redirect('shop:product_list')
+            option_error = validate_option_duplicates(request.POST.get('options_data', ''))
+            if option_error:
+                form.add_error(None, option_error)
+            else:
+                return create_product_from_form(request, form)
     else:
         form = ProductForm()
 
-    context = {
-        'form': form,
-        **get_product_form_context()
-    }
+    context = {'form': form, **get_product_form_context()}
     return render(request, 'shop/product_form.html', context)
+
+
+def create_product_from_form(request, form):
+    with transaction.atomic():
+        product = form.save(commit=False)
+
+        uploaded_image = request.FILES.get('featured_image_file')
+        if uploaded_image:
+            stored_file = FileManager.store(
+                uploaded_file=uploaded_image,
+                path='products',
+                user=request.user,
+                is_secure=False
+            )
+            product.featured_image_id = stored_file.id
+
+        product.save()
+        form.save_m2m()
+
+        raw_attributes = request.POST.get('attributes_json', '[]')
+        sync_product_attributes(product, raw_attributes)
+
+        options_data_str = request.POST.get('options_data', '')
+        save_product_options(product, options_data_str)
+
+        handle_album_uploads(request, product)
+
+    messages.success(request, 'محصول با موفقیت ایجاد شد.')
+
+    save_action = request.POST.get('save_action', 'exit')
+    if save_action == 'stay':
+        return redirect('shop:product_update', pk=product.pk)
+    return redirect('shop:product_list')
 
 @permission_required('shop.change_product', raise_exception=True)
 def product_update(request, pk):
@@ -92,14 +98,11 @@ def product_update(request, pk):
     product = get_object_or_404(Product, pk=pk)
     if request.method == 'POST':
 
-
-
         form = ProductForm(
             request.POST,
             request.FILES,
             instance=product
         )
-
 
         if form.is_valid():
 
@@ -107,18 +110,14 @@ def product_update(request, pk):
                 'featured_image_file'
             )
 
-
             image_file_id = None
 
             if uploaded_image:
-
                 stored_file = FileManager.store(
                     uploaded_file=uploaded_image,
                     user=request.user,
                     is_secure=False,
                 )
-
-
 
                 image_file_id = stored_file.id
 
@@ -133,13 +132,15 @@ def product_update(request, pk):
             if duplicate_error:
                 messages.error(request, duplicate_error)
                 context = get_product_form_context(product)
-                context.update({'form': form, 'title': title, 'breadcrumbs': get_default_breadcrumbs(), 'is_edit': True})
+                context.update(
+                    {'form': form, 'title': title, 'breadcrumbs': get_default_breadcrumbs(), 'is_edit': True})
                 return render(request, 'shop/product_form.html', context)
             option_error = validate_locked_product_options(product, options_data_str)
             if option_error:
                 messages.error(request, option_error)
                 context = get_product_form_context(product)
-                context.update({'form': form, 'title': title, 'breadcrumbs': get_default_breadcrumbs(), 'is_edit': True})
+                context.update(
+                    {'form': form, 'title': title, 'breadcrumbs': get_default_breadcrumbs(), 'is_edit': True})
                 return render(request, 'shop/product_form.html', context)
             product.save()
             form.save_m2m()
@@ -151,8 +152,6 @@ def product_update(request, pk):
 
             handle_album_uploads(request, product)
 
-
-
             messages.success(
                 request,
                 'محصول با موفقیت به‌روزرسانی شد.'
@@ -162,20 +161,17 @@ def product_update(request, pk):
                 return redirect('shop:product_update', pk=product.pk)
             return redirect('shop:product_list')
 
-
         messages.error(
             request,
             'اطلاعات فرم صحیح نیست.'
         )
     else:
-     form = ProductForm(instance=product)
+        form = ProductForm(instance=product)
     breadcrumbs = get_default_breadcrumbs()
-    breadcrumbs.append({"title":title, "url": None})
+    breadcrumbs.append({"title": title, "url": None})
     context = get_product_form_context(product)
     context.update({'form': form, 'title': title, 'breadcrumbs': breadcrumbs, 'is_edit': True})
-    # raise Exception(context)
     return render(request, 'shop/product_form.html', context)
-
 
 
 class ProductDeleteView(PermissionRequiredMixin, DeleteView):
@@ -186,6 +182,7 @@ class ProductDeleteView(PermissionRequiredMixin, DeleteView):
     def delete(self, request, *args, **kwargs):
         messages.success(self.request, 'محصول با موفقیت حذف شد.')
         return super().delete(request, *args, **kwargs)
+
 
 def handle_album_uploads(request, product):
     album_files = request.FILES.getlist('album_files')
@@ -212,6 +209,7 @@ def handle_album_uploads(request, product):
 
 
 @require_POST
+@permission_required('shop.change_product', raise_exception=True)
 def product_album_delete(request, pk):
     item = get_object_or_404(ProductAlbum, pk=pk)
     product_pk = item.product_id
@@ -224,6 +222,7 @@ def product_album_delete(request, pk):
 
     messages.success(request, 'آیتم با موفقیت از آلبوم حذف شد.')
     return redirect('shop:product_update', pk=product_pk)
+
 
 def save_product_options(product, options_json_str):
     """
@@ -239,50 +238,36 @@ def save_product_options(product, options_json_str):
         return
 
     with transaction.atomic():
-        # Removing previous product options for a clean update
-        product.option_items.all().delete()
-
+        retained_ids = []
         for item_data in options_data:
             val_id = item_data.get('value_id')
             if not val_id:
                 continue
-
-            try:
-                val_obj = ProductOptionValue.objects.get(pk=val_id)
-            except ProductOptionValue.DoesNotExist:
+            val_obj = ProductOptionValue.objects.filter(pk=val_id).first()
+            if not val_obj:
                 continue
 
-            # Create a parent item (Level 1 – e.g., Color)
-            parent_item = ProductOptionItem.objects.create(
-                product=product,
-                option_value=val_obj,
-                parent=None,
-                price=item_data.get('price') or None,
-                stock=item_data.get('stock') or 0
+            parent_item, _ = ProductOptionItem.objects.update_or_create(
+                product=product, option_value=val_obj, parent=None,
+                defaults={'price': item_data.get('price') or None,
+                          'stock': item_data.get('stock') or 0},
             )
-
-            # Processing children (Level 2 – e.g., sizes associated with this color)
-            children = item_data.get('children', [])
-            for child_data in children:
-                c_val_id = child_data.get('value_id')
-                if not c_val_id:
+            retained_ids.append(parent_item.pk)
+            for child_data in item_data.get('children', []):
+                child_value = ProductOptionValue.objects.filter(
+                    pk=child_data.get('value_id')
+                ).first()
+                if not child_value or child_value.group_id == val_obj.group_id:
                     continue
-
-                try:
-                    c_val_obj = ProductOptionValue.objects.get(pk=c_val_id)
-                except ProductOptionValue.DoesNotExist:
-                    continue
-                # The subgroup must be different from the main group.
-                if c_val_obj.group_id == val_obj.group_id:
-                    continue
-
-                ProductOptionItem.objects.create(
-                    product=product,
-                    option_value=c_val_obj,
-                    parent=parent_item, # Connecting to the parent to create a tree structure
-                    price=child_data.get('price') or None,
-                    stock=child_data.get('stock') or 0
+                child, _ = ProductOptionItem.objects.update_or_create(
+                    product=product, option_value=child_value, parent=parent_item,
+                    defaults={'price': child_data.get('price') or None,
+                              'stock': child_data.get('stock') or 0},
                 )
+                retained_ids.append(child.pk)
+
+        # Keep existing rows for unchanged options so cart references remain valid.
+        product.option_items.exclude(pk__in=retained_ids).delete()
 
 
 def validate_locked_product_options(product, options_json_str):
@@ -303,7 +288,8 @@ def validate_locked_product_options(product, options_json_str):
     if len(submitted_parent_groups) > 1:
         return 'همه گزینه‌های اصلی باید از یک گروه باشند.'
     # An empty array means the user has removed all options; this state is permitted.
-    if submitted_parent_groups and existing_parent_group is not None and submitted_parent_groups != {existing_parent_group}:
+    if submitted_parent_groups and existing_parent_group is not None and submitted_parent_groups != {
+        existing_parent_group}:
         return 'گروه اصلی در ویرایش قابل تغییر نیست؛ ابتدا آپشن‌های قبلی را حذف کنید.'
 
     submitted_child_groups = set()
@@ -325,18 +311,49 @@ def validate_locked_product_options(product, options_json_str):
 
 
 def validate_option_duplicates(options_json_str):
-    """Validation to ensure values ​​for the new product are unique."""
+    """Validate the submitted option tree before changing product data."""
     try:
         data = json.loads(options_json_str or '[]')
-    except (json.JSONDecodeError, TypeError):
+        if not isinstance(data, list):
+            raise ValueError
+        parent_ids = set()
+        submitted_values = []
+        for parent in data:
+            if not isinstance(parent, dict):
+                raise ValueError
+            parent_id = int(parent['value_id'])
+            parent_group = int(parent['group_id'])
+            submitted_values.append((parent_id, parent_group))
+            if parent_id in parent_ids:
+                return 'یک مقدار اصلی نمی‌تواند دوبار ثبت شود.'
+            parent_ids.add(parent_id)
+            children = parent.get('children', [])
+            if not isinstance(children, list):
+                raise ValueError
+            child_ids = set()
+            for child in children:
+                if not isinstance(child, dict):
+                    raise ValueError
+                child_id = int(child['value_id'])
+                child_group = int(child['group_id'])
+                if child_group == parent_group:
+                    return 'گروه فرعی باید با گروه اصلی متفاوت باشد.'
+                submitted_values.append((child_id, child_group))
+                if child_id in child_ids:
+                    return 'یک مقدار فرعی نمی‌تواند برای یک گزینه دوبار ثبت شود.'
+                child_ids.add(child_id)
+            for item in [parent, *children]:
+                stock = int(item.get('stock') or 0)
+                price = item.get('price')
+                if stock < 0 or (price not in (None, '') and (not Decimal(str(price)).is_finite() or Decimal(str(price)) < 0)):
+                    raise ValueError
+        actual_groups = dict(ProductOptionValue.objects.filter(
+            pk__in=[value_id for value_id, _ in submitted_values]
+        ).values_list('pk', 'group_id'))
+        if any(actual_groups.get(value_id) != group_id for value_id, group_id in submitted_values):
+            return 'مقدار یا گروه آپشن نامعتبر است.'
+    except (ValueError, TypeError, KeyError, InvalidOperation):
         return 'ساختار آپشن‌ها نامعتبر است.'
-    parent_ids = [int(p.get('value_id')) for p in data if p.get('value_id')]
-    if len(parent_ids) != len(set(parent_ids)):
-        return 'یک مقدار اصلی نمی‌تواند دوبار ثبت شود.'
-    for parent in data:
-        child_ids = [int(c.get('value_id')) for c in parent.get('children', []) if c.get('value_id')]
-        if len(child_ids) != len(set(child_ids)):
-            return 'یک مقدار فرعی نمی‌تواند برای یک گزینه دوبار ثبت شود.'
     return None
 
 
@@ -401,14 +418,15 @@ def get_product_form_context(product=None):
             cls=DjangoJSONEncoder,
         )
 
-        #Retrieving the product's existing technical specifications from the database
+        # Retrieving the product's existing technical specifications from the database
         existing_attributes = list(product.attributes.all())
 
     return {
         'option_groups_json': option_groups_json,
         'existing_options_json': existing_options_json,
-        'existing_attributes': existing_attributes,  #Passing to the template
+        'existing_attributes': existing_attributes,  # Passing to the template
     }
+
 
 def sync_product_attributes(product, raw_json):
     """

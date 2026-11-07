@@ -2,8 +2,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.shortcuts import render, redirect, get_object_or_404
-from django.template.defaultfilters import title
-from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from media_files.services import FileManager
@@ -17,7 +15,7 @@ def get_default_breadcrumbs(without_link=False):
         "دسته‌بندی‌ها", "shop:category_list", without_link
     )
 
-@login_required
+@permission_required('shop.view_category', raise_exception=True)
 def category_list(request):
     title="دسته‌بندی‌ها"
     categories = Category.objects.all().order_by("-id")
@@ -34,7 +32,7 @@ def category_list(request):
     )
 
 
-@login_required
+@permission_required('shop.add_category', raise_exception=True)
 def category_create(request):
     title = "افزودن دسته‌بندی"
     if request.method == "POST":
@@ -80,7 +78,7 @@ def category_create(request):
     )
 
 
-@login_required
+@permission_required('shop.change_category', raise_exception=True)
 def category_update(request, pk):
     title = "ویرایش دسته‌بندی"
     category = get_object_or_404(Category, pk=pk)
